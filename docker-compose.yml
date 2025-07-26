@@ -1,0 +1,72 @@
+---
+networks:
+  private_network:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      driver: default
+      config:
+        - subnet: ${NETWORK_SUBNET_IPV4:-10.42.42.0/24}
+        - subnet: ${NETWORK_SUBNET_IPV6:-fdcc:ad94:bacf:61a3::/64}
+
+services:
+  unbound:
+    container_name: unbound
+    image: klutchell/unbound:latest
+    restart: unless-stopped
+    hostname: unbound
+    networks:
+      private_network:
+        ipv4_address: ${UNBOUND_IP:-10.42.42.200}
+
+  pihole:
+    depends_on: [unbound]
+    container_name: pihole
+    image: pihole/pihole:latest
+    restart: unless-stopped
+    hostname: pihole
+    dns:
+      - 127.0.0.1
+      - ${UNBOUND_IP:-10.42.42.200}
+    environment:
+      TZ: ${TIMEZONE}
+      FTLCONF_webserver_api_password: ${PIHOLE_PASSWORD}
+      FTLCONF_dns_listeningMode: "all"
+      ServerIP: ${PIHOLE_IP:-10.42.42.100}
+      DNS1: ${UNBOUND_IP:-10.42.42.200}
+      DNS2: ${FALLBACK_DNS:-1.1.1.1}
+    volumes:
+      - ${PIHOLE_CONFIG_PATH}:/etc/pihole/
+      - ${PIHOLE_DNSMASQ_PATH}:/etc/dnsmasq.d/
+    cap_add:
+      - NET_ADMIN
+    networks:
+      private_network:
+        ipv4_address: ${PIHOLE_IP:-10.42.42.100}
+
+  wg-easy:
+    depends_on: [unbound, pihole]
+    container_name: wg-easy
+    image: ghcr.io/wg-easy/wg-easy:15.1.0
+    restart: unless-stopped
+    environment:
+      - INSECURE=true
+    volumes:
+      - ${WG_CONFIG_PATH}:/etc/wireguard
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "${WG_PORT:-51820}:51820/udp"
+      - "${WG_WEB_PORT:-51821}:51821/tcp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.default.forwarding=1
+    networks:
+      private_network:
+        ipv4_address: ${WG_IP:-10.42.42.42}
+        ipv6_address: ${WG_IPV6:-fdcc:ad94:bacf:61a3::2a}
